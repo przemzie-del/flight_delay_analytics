@@ -1,0 +1,2 @@
+flights,cancelled_flights,diverted_flights,known_dep_delay,delayed_15_flights,delayed_15_rate,delayed_30_rate,mean_dep_delay,median_dep_delay
+700161,10278,1875,690325,149967,0.21724115452866405,0.14575019012783832,13.584200195560062,-2.0

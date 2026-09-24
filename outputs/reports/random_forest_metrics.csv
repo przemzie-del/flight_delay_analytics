@@ -1,0 +1,2 @@
+train_rows_used,test_rows,train_start_date,train_end_date,test_start_date,test_end_date,predictors,accuracy,precision,recall,roc_auc,selected_threshold_youden,true_negative,false_positive,false_negative,true_positive,balanced_accuracy
+550406,137602,2025-01-01,2025-10-19,2025-10-19,2025-12-31,61,0.6490530660891557,0.3365011483329373,0.5348859166011015,0.660237574027953,0.2347193100404747,72315,33512,14779,16996,0.6091090737531291
