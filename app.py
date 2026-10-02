@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
@@ -22,6 +23,30 @@ def load_csv(path):
     return pd.read_csv(path)
 
 
+def readable_feature_name(variable):
+    """Zamień techniczną nazwę predyktora na krótką etykietę wykresu."""
+    names = {
+        "month": "Miesiąc",
+        "scheduled_hour": "Planowana godzina odlotu",
+        "distance_1000_miles": "Dystans w tysiącach mil",
+    }
+    if variable in names:
+        return names[variable]
+    prefixes = {
+        "carrier_model_": "Przewoźnik: ",
+        "origin_model_": "Lotnisko startowe: ",
+        "dest_model_": "Lotnisko docelowe: ",
+        "day_of_week_": "Dzień tygodnia: ",
+    }
+    for prefix, label in prefixes.items():
+        if variable.startswith(prefix):
+            value = variable.removeprefix(prefix)
+            if value == "OTHER":
+                value = "pozostałe"
+            return label + value
+    return variable
+
+
 st.set_page_config(
     page_title="Flight Delay Analytics",
     layout="wide",
@@ -37,7 +62,10 @@ if not overall_path.exists():
     st.stop()
 
 st.title("Flight Delay Analytics")
-st.caption("Analiza opóźnień lotów BTS — pełny rok 2025, próba 10%")
+st.caption(
+    "Analiza opóźnień lotów BTS — pełny rok 2025, losowa próba "
+    "o wielkości 10% oryginalnego zbioru"
+)
 st.write(
     "Aplikacja przedstawia najważniejsze wyniki analizy opóźnień krajowych "
     "lotów pasażerskich w Stanach Zjednoczonych oraz porównuje trzy modele "
@@ -60,20 +88,27 @@ with col4.container(border=True):
     )
 
 summary_tab, analysis_tab, models_tab, conclusions_tab = st.tabs(
-    ["Podsumowanie", "Analiza opisowa", "Modele", "Wnioski i metodologia"]
+    ["Opis projektu", "Analiza opisowa", "Modele", "Wnioski"]
 )
 
 with summary_tab:
-    st.header("Podsumowanie projektu")
+    st.header("Opis projektu")
+
+    st.subheader("Cel projektu")
     st.write(
         "Celem projektu jest analiza opóźnień krajowych lotów pasażerskich "
         "w Stanach Zjednoczonych oraz porównanie modeli przewidujących, czy lot "
         "będzie opóźniony o co najmniej 15 minut."
     )
+
+    st.subheader("Dane")
     st.write(
         "Analiza wykorzystuje dane Bureau of Transportation Statistics (BTS) "
-        "za pełny rok 2025. Ze względu na wielkość zbioru zastosowano "
-        "powtarzalną próbę 10%."
+        "za pełny rok 2025. Ze względu na wielkość danych zastosowano losową "
+        "próbę o wielkości 10% oryginalnego zbioru, utworzoną w sposób "
+        "powtarzalny z użyciem random_state=42. Po czyszczeniu próba obejmuje "
+        "700 161 lotów, a zbiór modelowy 688 008 wykonanych i "
+        "nieprzekierowanych lotów ze znanym opóźnieniem odlotu."
     )
 
     st.subheader("Zakres przewidywania")
@@ -81,6 +116,41 @@ with summary_tab:
         "Zmienna docelowa przyjmuje wartość 1, gdy opóźnienie odlotu "
         "wynosi co najmniej 15 minut, oraz 0 w pozostałych przypadkach. "
         "Modele korzystają wyłącznie z informacji dostępnych przed odlotem."
+    )
+
+    st.subheader("Metodologia")
+    st.write(
+        "Porównano model bazowy Logit oraz modele Random Forest i LightGBM. "
+        "Wszystkie modele wykorzystują ten sam zestaw 61 predyktorów i ten sam "
+        "chronologiczny podział danych. Nie stosowano SMOTE, undersamplingu, "
+        "oversamplingu ani wag klas — zachowano naturalny udział lotów "
+        "opóźnionych."
+    )
+    if metrics_path.exists():
+        split_metrics = load_csv(metrics_path).iloc[0]
+        train_rows = f"{int(split_metrics['train_rows_used']):,}".replace(
+            ",", " "
+        )
+        test_rows = f"{int(split_metrics['test_rows']):,}".replace(",", " ")
+        st.write(
+            f"Zbiór uczący obejmuje {train_rows} "
+            "lotów od 1 stycznia do 19 października 2025, a zbiór testowy "
+            f"{test_rows} lotów od 19 października do "
+            "31 grudnia 2025. Granica podziału przypada w trakcie 19 "
+            "października, dlatego październik występuje w obu zbiorach."
+        )
+    st.write(
+        "Próg klasyfikacji każdego modelu wyznaczono metodą Youdena wyłącznie "
+        "na zbiorze uczącym. Jakość modeli oceniono następnie na późniejszym "
+        "zbiorze testowym, którego nie wykorzystywano do wyboru progu."
+    )
+
+    st.subheader("Ograniczenia")
+    st.write(
+        "Wyniki dotyczą losowej próby danych BTS z jednego roku i krajowych "
+        "lotów pasażerskich w USA. Projekt nie wykorzystuje dodatkowych danych "
+        "pogodowych, nie obejmuje rozbudowanego strojenia hiperparametrów i ma "
+        "charakter predykcyjny, a nie przyczynowy."
     )
 
 with analysis_tab:
@@ -335,6 +405,13 @@ with models_tab:
         )
 
         st.subheader("Progi Youdena")
+        st.write(
+            "Próg Youdena określa wartość prawdopodobieństwa, od której model "
+            "klasyfikuje lot jako opóźniony. Jest wybierany na zbiorze uczącym "
+            "tak, aby uzyskać korzystny kompromis między prawidłowym "
+            "rozpoznawaniem lotów opóźnionych i nieopóźnionych. Dlatego może "
+            "być niższy od standardowego progu 0,5 i różnić się między modelami."
+        )
         thresholds = pd.DataFrame(
             {
                 "Model": ["Logit", "Random Forest", "LightGBM"],
@@ -351,6 +428,39 @@ with models_tab:
             hide_index=True,
         )
 
+        st.subheader("Zmienne wykorzystywane przez modele")
+        feature_descriptions = pd.DataFrame(
+            {
+                "Zmienna źródłowa": [
+                    "month",
+                    "scheduled_hour",
+                    "distance_1000_miles",
+                    "carrier_model",
+                    "origin_model",
+                    "dest_model",
+                    "day_of_week",
+                ],
+                "Znaczenie": [
+                    "Miesiąc planowanego odlotu",
+                    "Planowana godzina odlotu",
+                    "Dystans lotu wyrażony w tysiącach mil",
+                    "Przewoźnik wykonujący lot",
+                    "Lotnisko startowe",
+                    "Lotnisko docelowe",
+                    "Dzień tygodnia planowanego odlotu",
+                ],
+            }
+        )
+        st.dataframe(feature_descriptions, width="stretch", hide_index=True)
+        st.caption(
+            "Zmienne jakościowe zamieniono na zmienne zero-jedynkowe. Rzadziej "
+            "występujących przewoźników i lotniska połączono w kategorię OTHER. "
+            "Przykładowo carrier_model_WN oznacza przewoźnika WN, a "
+            "origin_model_DFW — wylot z lotniska DFW. Po kodowaniu każdy model "
+            "korzysta z 61 predyktorów."
+        )
+
+        st.subheader("Ważność zmiennych")
         importance_model = st.selectbox(
             "Najważniejsze zmienne:", ["Random Forest", "LightGBM"]
         )
@@ -360,27 +470,41 @@ with models_tab:
         }
         importance = load_csv(
             REPORTS_DIR / importance_files[importance_model]
-        ).head(15)
-        st.line_chart(
-            importance,
-            x="variable",
-            y="importance",
-            x_label="Zmienna",
-            y_label="Ważność",
+        ).sort_values("importance", ascending=False).head(15)
+        importance["label"] = importance["variable"].map(
+            readable_feature_name
+        )
+        chart_data = importance.sort_values("importance", ascending=True)
+        figure, axis = plt.subplots(figsize=(9, 6))
+        axis.barh(
+            chart_data["label"],
+            chart_data["importance"],
             color=MODEL_COLORS[importance_model],
         )
+        axis.set_xlabel("Ważność")
+        axis.set_ylabel("Zmienna")
+        axis.grid(axis="x", alpha=0.25)
+        figure.tight_layout()
+        st.pyplot(figure)
+        plt.close(figure)
         most_important = importance.iloc[0]
         st.caption(
             f"Najważniejsza zmienna modelu {importance_model} to "
-            f"{most_important['variable']} (ważność: "
+            f"{most_important['label']} (ważność: "
             f"{most_important['importance']:.3f})."
         )
         st.dataframe(
-            importance.rename(
-                columns={"variable": "Zmienna", "importance": "Ważność"}
+            importance[["label", "importance"]].rename(
+                columns={"label": "Zmienna", "importance": "Ważność"}
             ).style.format({"Ważność": "{:.3f}"}),
             width="stretch",
             hide_index=True,
+        )
+        st.caption(
+            "Ważność pokazuje udział zmiennej w działaniu danego modelu, lecz "
+            "nie oznacza związku przyczynowego z opóźnieniem. Wartości Random "
+            "Forest i LightGBM są obliczane inaczej, dlatego należy porównywać "
+            "kolejność cech wewnątrz modelu, a nie wartości między modelami."
         )
 
         confusion_model = st.selectbox(
@@ -465,16 +589,4 @@ with conclusions_tab:
         "Sama accuracy może zawyżać ocenę modelu, gdy klasy nie są "
         "równoliczne. Balanced accuracy nadaje taką samą wagę poprawnemu "
         "rozpoznawaniu lotów opóźnionych i nieopóźnionych."
-    )
-
-    st.subheader("Metodologia i ograniczenia")
-    st.write(
-        "Dane podzielono chronologicznie: wcześniejsze obserwacje wykorzystano "
-        "do trenowania, a późniejsze do testowania. Ten sam zestaw zmiennych "
-        "i wspólny zbiór testowy umożliwiają porównanie modeli bez wycieku danych."
-    )
-    st.write(
-        "Wyniki dotyczą 10-procentowej próby lotów BTS z 2025 roku. "
-        "Predykcja wykorzystuje wyłącznie informacje znane przed odlotem, "
-        "dlatego nie obejmuje zdarzeń pojawiających się dopiero w trakcie lotu."
     )
